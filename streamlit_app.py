@@ -15,9 +15,13 @@ sys.path.insert(0, os.path.dirname(__file__))
 if "ANTHROPIC_API_KEY" in st.secrets:
     os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
 if "LANGSMITH_API_KEY" in st.secrets:
+    # LangSmith needs BOTH variable names set
     os.environ["LANGSMITH_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
+    os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
     os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
     os.environ["LANGSMITH_PROJECT"] = "ai-support-agent"
+    os.environ["LANGCHAIN_PROJECT"] = "ai-support-agent"
 
 from app.ingest import ingest_text, ingest_file, get_collection_stats, clear_collection
 from app.agent import safe_ask
@@ -50,20 +54,6 @@ st.markdown("""
         color: #888;
         margin-top: -10px;
         margin-bottom: 30px;
-    }
-    .metric-card {
-        background: #f8f9fa;
-        border-radius: 10px;
-        padding: 15px;
-        text-align: center;
-        border: 1px solid #e9ecef;
-    }
-    .source-tag {
-        background: #e8f4fd;
-        border-radius: 5px;
-        padding: 3px 8px;
-        font-size: 0.8rem;
-        color: #1976d2;
     }
     .stChatMessage {
         border-radius: 15px;
@@ -103,11 +93,9 @@ with st.sidebar:
             with st.spinner("Indexing documents..."):
                 total_chunks = 0
                 for uploaded_file in uploaded_files:
-                    # Save to temp file
                     with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp:
                         tmp.write(uploaded_file.getvalue())
                         tmp_path = tmp.name
-
                     try:
                         chunks = ingest_file(tmp_path)
                         total_chunks += chunks
@@ -116,7 +104,6 @@ with st.sidebar:
                         st.error(f"❌ {uploaded_file.name}: {str(e)}")
                     finally:
                         os.unlink(tmp_path)
-
                 st.success(f"🎉 Total: {total_chunks} chunks indexed!")
                 st.rerun()
 
@@ -139,7 +126,6 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Clear knowledge base
     if doc_count > 0:
         if st.button("🗑️ Clear Knowledge Base", use_container_width=True):
             clear_collection()
@@ -166,19 +152,16 @@ with st.sidebar:
 st.markdown('<p class="main-header">🤖 AI Support Agent</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Upload your docs → Get an AI that answers customer questions with citations</p>', unsafe_allow_html=True)
 
-# Show status
 if doc_count == 0:
     st.info("👈 **Get started:** Upload documents or paste text in the sidebar to build your knowledge base.")
 else:
     st.success(f"✅ Knowledge base ready with **{doc_count}** document chunks. Start chatting below!")
 
-# Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Display chat messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -192,17 +175,14 @@ for message in st.session_state.messages:
             cols[1].caption(f"🔤 {m.get('input_tokens', 0) + m.get('output_tokens', 0)} tokens")
             cols[2].caption(f"💰 ${m.get('cost_usd', 0):.6f}")
 
-# Chat input
 if prompt := st.chat_input("Ask a question about the uploaded documents..."):
     if doc_count == 0:
         st.warning("Please upload documents first using the sidebar.")
     else:
-        # Add user message
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # Get AI response
         with st.chat_message("assistant"):
             with st.spinner("Searching knowledge base..."):
                 result = safe_ask(
@@ -213,19 +193,16 @@ if prompt := st.chat_input("Ask a question about the uploaded documents..."):
 
             st.markdown(result["answer"])
 
-            # Show sources
             if result.get("sources"):
                 sources_text = " | ".join([f"📄 {s}" for s in result["sources"]])
                 st.caption(f"Sources: {sources_text}")
 
-            # Show metrics
             if not result.get("blocked"):
                 cols = st.columns(3)
                 cols[0].caption(f"⏱️ {result.get('latency_ms', 0):.0f}ms")
                 cols[1].caption(f"🔤 {result.get('input_tokens', 0) + result.get('output_tokens', 0)} tokens")
                 cols[2].caption(f"💰 ${result.get('cost_usd', 0):.6f}")
 
-        # Save to history
         st.session_state.messages.append({
             "role": "assistant",
             "content": result["answer"],
