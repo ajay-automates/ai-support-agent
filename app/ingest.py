@@ -9,10 +9,9 @@ from typing import List
 from langchain_community.document_loaders import (
     TextLoader,
     PyPDFLoader,
-    UnstructuredHTMLLoader,
 )
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
 # ============================================================
@@ -65,17 +64,15 @@ def ingest_text(text: str, source: str = "pasted_text", collection_name: str = "
 
 
 def ingest_file(file_path: str, collection_name: str = "default") -> int:
-    """Ingest a file (PDF, TXT, HTML) into the vectorstore."""
+    """Ingest a file (PDF, TXT) into the vectorstore."""
     ext = os.path.splitext(file_path)[1].lower()
 
     if ext == ".pdf":
         loader = PyPDFLoader(file_path)
     elif ext in [".txt", ".md"]:
         loader = TextLoader(file_path, encoding="utf-8")
-    elif ext in [".html", ".htm"]:
-        loader = UnstructuredHTMLLoader(file_path)
     else:
-        raise ValueError(f"Unsupported file type: {ext}. Use PDF, TXT, MD, or HTML.")
+        raise ValueError(f"Unsupported file type: {ext}. Use PDF, TXT, or MD.")
 
     raw_docs = loader.load()
 
