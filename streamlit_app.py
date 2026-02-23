@@ -3,25 +3,40 @@ AI Support Agent — Streamlit Chat Interface
 Upload your business documents and get an AI-powered support chatbot.
 """
 
-import streamlit as st
 import os
 import sys
+
+# ============================================================
+# CRITICAL: Set env vars BEFORE any LangChain imports
+# LangChain reads these at import time
+# ============================================================
+# Try loading from Streamlit secrets first
+try:
+    import streamlit as st
+    if "LANGSMITH_API_KEY" in st.secrets:
+        os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
+        os.environ["LANGSMITH_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
+    if "LANGCHAIN_API_KEY" in st.secrets:
+        os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
+    if "ANTHROPIC_API_KEY" in st.secrets:
+        os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
+    if "LANGCHAIN_TRACING_V2" in st.secrets:
+        os.environ["LANGCHAIN_TRACING_V2"] = st.secrets["LANGCHAIN_TRACING_V2"]
+    if "LANGCHAIN_PROJECT" in st.secrets:
+        os.environ["LANGCHAIN_PROJECT"] = st.secrets["LANGCHAIN_PROJECT"]
+except Exception:
+    pass
+
+# Force these regardless
+os.environ["LANGCHAIN_TRACING_V2"] = os.environ.get("LANGCHAIN_TRACING_V2", "true")
+os.environ["LANGCHAIN_PROJECT"] = os.environ.get("LANGCHAIN_PROJECT", "ai-support-agent")
+os.environ["LANGSMITH_TRACING"] = "true"
+
+import streamlit as st
 import tempfile
 
 # Setup paths
 sys.path.insert(0, os.path.dirname(__file__))
-
-# Set API keys from Streamlit secrets
-if "ANTHROPIC_API_KEY" in st.secrets:
-    os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
-if "LANGSMITH_API_KEY" in st.secrets:
-    # LangSmith needs BOTH variable names set
-    os.environ["LANGSMITH_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
-    os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGSMITH_API_KEY"]
-    os.environ["LANGSMITH_TRACING"] = "true"
-    os.environ["LANGCHAIN_TRACING_V2"] = "true"
-    os.environ["LANGSMITH_PROJECT"] = "ai-support-agent"
-    os.environ["LANGCHAIN_PROJECT"] = "ai-support-agent"
 
 from app.ingest import ingest_text, ingest_file, get_collection_stats, clear_collection
 from app.agent import safe_ask
@@ -139,6 +154,11 @@ with st.sidebar:
         ["v2_cited", "v1_simple"],
         help="v2_cited gives detailed answers with source citations. v1_simple is more concise.",
     )
+
+    # Debug: show tracing status
+    tracing_status = os.environ.get("LANGCHAIN_TRACING_V2", "not set")
+    api_key_set = "✅" if os.environ.get("LANGCHAIN_API_KEY") else "❌"
+    st.caption(f"LangSmith: Tracing={tracing_status} | Key={api_key_set}")
 
     st.markdown("---")
     st.markdown(
