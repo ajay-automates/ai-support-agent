@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 AI Support Agent - Voice + Text Edition
-Supports both text chat and voice conversation using browser Web Speech API.
+Uses streamlit-mic-recorder for real voice input with browser speech recognition.
 """
 
 import os
@@ -28,11 +28,12 @@ import tempfile
 sys.path.insert(0, os.path.dirname(__file__))
 from app.ingest import ingest_text, ingest_file, get_collection_stats, clear_collection
 from app.agent import safe_ask
+from streamlit_mic_recorder import speech_to_text
 
 st.set_page_config(page_title="Support Agent AI", page_icon="bolt", layout="wide", initial_sidebar_state="expanded")
 
 # ============================================================
-# PREMIUM CSS + VOICE UI STYLES
+# CSS
 # ============================================================
 st.markdown("""
 <style>
@@ -50,7 +51,6 @@ st.markdown("""
     [data-testid="stSidebar"] .stButton > button:hover { background: #4c4cbf !important; transform: translateY(-1px) !important; }
     [data-testid="stSidebar"] [data-testid="stFileUploader"] { border: 1.5px dashed rgba(255,255,255,0.08) !important; border-radius: 12px !important; background: rgba(255,255,255,0.02) !important; }
     [data-testid="stSidebar"] textarea { background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 10px !important; }
-    [data-testid="stSidebar"] textarea:focus { border-color: #5b5bd6 !important; }
     .hero { position: relative; background: #0a0a0b; border-radius: 24px; padding: 48px 44px 44px; margin-bottom: 32px; overflow: hidden; border: 1px solid rgba(255,255,255,0.06); }
     .hero::before { content: ''; position: absolute; top: -60%; right: -20%; width: 500px; height: 500px; background: radial-gradient(circle, rgba(91,91,214,0.15) 0%, transparent 70%); pointer-events: none; }
     .hero::after { content: ''; position: absolute; bottom: -40%; left: -10%; width: 350px; height: 350px; background: radial-gradient(circle, rgba(214,91,161,0.08) 0%, transparent 70%); pointer-events: none; }
@@ -69,14 +69,9 @@ st.markdown("""
     .m-strip { display: flex; gap: 24px; margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.04); }
     .m-item { font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: #9898a6; }
     [data-testid="stChatInput"] textarea { font-family: 'DM Sans', sans-serif !important; border-radius: 14px !important; border: 1.5px solid #e0e0e6 !important; }
-    [data-testid="stChatInput"] textarea:focus { border-color: #5b5bd6 !important; box-shadow: 0 0 0 3px rgba(91,91,214,0.08) !important; }
     .stAlert { border-radius: 14px !important; }
     .app-footer { text-align: center; padding: 28px 0 8px; margin-top: 48px; border-top: 1px solid rgba(0,0,0,0.05); font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: #b0b0ba; }
-    .app-footer a { color: #5b5bd6; text-decoration: none; }
-    .mode-tabs { display: flex; gap: 0; margin-bottom: 24px; border-radius: 12px; overflow: hidden; border: 1px solid rgba(0,0,0,0.08); }
-    .mode-tab { flex: 1; padding: 12px; text-align: center; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; letter-spacing: 1px; cursor: pointer; transition: all 0.2s; background: #f8f8fa; color: #888; border: none; }
-    .mode-tab.active { background: #5b5bd6; color: white; }
-    .mode-tab:hover:not(.active) { background: #f0f0f5; }
+    .voice-label { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; letter-spacing: 1px; color: #5b5bd6; text-align: center; margin-bottom: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -120,8 +115,8 @@ with st.sidebar:
         if st.button("Clear Knowledge Base", use_container_width=True):
             clear_collection(); st.rerun()
     st.markdown("---")
-    st.markdown("##### Prompt Style")
-    prompt_version = st.selectbox("prompt", ["v2_cited", "v1_simple"], label_visibility="collapsed")
+    st.markdown("##### Settings")
+    prompt_version = st.selectbox("Prompt Style", ["v2_cited", "v1_simple"], label_visibility="collapsed")
     st.markdown("---")
     st.markdown("<div style='text-align:center;opacity:0.3;font-size:0.65rem;padding:8px 0;font-family:JetBrains Mono,monospace;'>BUILT BY AJAY KUMAR REDDY</div>", unsafe_allow_html=True)
 
@@ -146,17 +141,18 @@ if doc_count == 0:
     st.info("Upload documents or paste text in the sidebar to get started.")
 
 # ============================================================
-# MODE SELECTOR: TEXT vs VOICE
+# INIT STATE
 # ============================================================
-if "chat_mode" not in st.session_state:
-    st.session_state.chat_mode = "text"
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-if "voice_input" not in st.session_state:
-    st.session_state.voice_input = ""
+if "chat_mode" not in st.session_state:
+    st.session_state.chat_mode = "text"
 
+# ============================================================
+# MODE TOGGLE
+# ============================================================
 col1, col2 = st.columns(2)
 with col1:
     if st.button("TEXT CHAT", use_container_width=True, type="primary" if st.session_state.chat_mode == "text" else "secondary"):
@@ -168,7 +164,43 @@ with col2:
         st.rerun()
 
 # ============================================================
-# DISPLAY CHAT HISTORY (shared between text and voice)
+# HELPER: Process a question and display result
+# ============================================================
+def process_question(question, voice=False):
+    prefix = "[VOICE] " if voice else ""
+    st.session_state.messages.append({"role": "user", "content": prefix + question})
+
+    with st.chat_message("user"):
+        st.markdown(prefix + question)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Searching knowledge base..."):
+            result = safe_ask(question=question, chat_history=st.session_state.chat_history, prompt_version=prompt_version)
+
+        answer = result["answer"]
+        st.markdown(answer)
+
+        if result.get("sources"):
+            pills_html = " ".join(['<span class="src-pill">SRC: ' + s + '</span>' for s in result["sources"]])
+            st.markdown(pills_html, unsafe_allow_html=True)
+
+        if not result.get("blocked"):
+            lat = str(int(result.get("latency_ms", 0))) + "ms"
+            tok = str(result.get("input_tokens", 0) + result.get("output_tokens", 0)) + " tok"
+            cost = "$" + format(result.get("cost_usd", 0), ".4f")
+            st.markdown('<div class="m-strip"><span class="m-item">' + lat + '</span><span class="m-item">' + tok + '</span><span class="m-item">' + cost + '</span></div>', unsafe_allow_html=True)
+
+        # Text-to-speech for voice mode
+        if voice and not result.get("blocked"):
+            clean_answer = answer.replace('`', "'").replace('"', "'").replace('\n', ' ')[:500]
+            tts_js = '<script>setTimeout(function(){var u=new SpeechSynthesisUtterance("' + clean_answer + '");u.rate=1.0;u.lang="en-US";speechSynthesis.speak(u);},500);</script>'
+            components.html(tts_js, height=0)
+
+    st.session_state.messages.append({"role": "assistant", "content": answer, "sources": result.get("sources", []), "metrics": result})
+    st.session_state.chat_history.append((question, answer))
+
+# ============================================================
+# DISPLAY CHAT HISTORY
 # ============================================================
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -191,182 +223,35 @@ if st.session_state.chat_mode == "text":
         if doc_count == 0:
             st.warning("Upload documents first.")
         else:
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            with st.chat_message("assistant"):
-                with st.spinner("Searching..."):
-                    result = safe_ask(question=prompt, chat_history=st.session_state.chat_history, prompt_version=prompt_version)
-                st.markdown(result["answer"])
-                if result.get("sources"):
-                    pills_html = " ".join(['<span class="src-pill">SRC: ' + s + '</span>' for s in result["sources"]])
-                    st.markdown(pills_html, unsafe_allow_html=True)
-                if not result.get("blocked"):
-                    lat = str(int(result.get("latency_ms", 0))) + "ms"
-                    tok = str(result.get("input_tokens", 0) + result.get("output_tokens", 0)) + " tok"
-                    cost = "$" + format(result.get("cost_usd", 0), ".4f")
-                    st.markdown('<div class="m-strip"><span class="m-item">' + lat + '</span><span class="m-item">' + tok + '</span><span class="m-item">' + cost + '</span></div>', unsafe_allow_html=True)
-            st.session_state.messages.append({"role": "assistant", "content": result["answer"], "sources": result.get("sources", []), "metrics": result})
-            st.session_state.chat_history.append((prompt, result["answer"]))
+            process_question(prompt, voice=False)
 
 # ============================================================
 # VOICE MODE
 # ============================================================
 if st.session_state.chat_mode == "voice":
     st.markdown("---")
+    st.markdown('<div class="voice-label">CLICK THE BUTTON BELOW TO SPEAK</div>', unsafe_allow_html=True)
 
-    # Voice input component using Web Speech API
-    voice_html = """
-    <div id="voice-container" style="text-align:center;padding:20px 0;">
-        <div id="status" style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:#888;margin-bottom:16px;letter-spacing:1px;">
-            CLICK MIC TO START SPEAKING
-        </div>
-        <button id="micBtn" onclick="toggleListening()" style="
-            width:80px;height:80px;border-radius:50%;border:3px solid #5b5bd6;
-            background:transparent;cursor:pointer;transition:all 0.3s;
-            display:flex;align-items:center;justify-content:center;margin:0 auto;
-        ">
-            <svg id="micIcon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#5b5bd6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                <line x1="12" y1="19" x2="12" y2="23"/>
-                <line x1="8" y1="23" x2="16" y2="23"/>
-            </svg>
-        </button>
-        <div id="transcript" style="font-family:'DM Sans',sans-serif;font-size:1rem;color:#333;margin-top:16px;min-height:24px;max-width:600px;margin-left:auto;margin-right:auto;"></div>
-        <div id="voiceWave" style="display:none;margin:16px auto;width:200px;height:40px;display:flex;align-items:center;justify-content:center;gap:3px;">
-        </div>
-    </div>
-    <script>
-    let listening = false;
-    let recognition = null;
-    let finalTranscript = '';
+    # speech_to_text from streamlit-mic-recorder
+    # This component handles mic recording + browser speech recognition
+    # Returns transcribed text directly into Streamlit
+    text = speech_to_text(
+        language="en",
+        start_prompt="START RECORDING",
+        stop_prompt="STOP RECORDING",
+        just_once=True,
+        use_container_width=True,
+        key="voice_stt",
+    )
 
-    // Check browser support
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if text:
+        st.markdown("**You said:** " + text)
+        if doc_count == 0:
+            st.warning("Upload documents first.")
+        else:
+            process_question(text, voice=True)
 
-    if (!SpeechRecognition) {
-        document.getElementById('status').textContent = 'VOICE NOT SUPPORTED IN THIS BROWSER. USE CHROME.';
-        document.getElementById('micBtn').style.opacity = '0.3';
-        document.getElementById('micBtn').style.cursor = 'not-allowed';
-    } else {
-        recognition = new SpeechRecognition();
-        recognition.continuous = false;
-        recognition.interimResults = true;
-        recognition.lang = 'en-US';
-
-        recognition.onstart = function() {
-            listening = true;
-            document.getElementById('status').textContent = 'LISTENING...';
-            document.getElementById('status').style.color = '#5b5bd6';
-            document.getElementById('micBtn').style.background = '#5b5bd6';
-            document.getElementById('micBtn').style.boxShadow = '0 0 30px rgba(91,91,214,0.4)';
-            document.getElementById('micIcon').setAttribute('stroke', '#ffffff');
-        };
-
-        recognition.onresult = function(event) {
-            let interim = '';
-            finalTranscript = '';
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                if (event.results[i].isFinal) {
-                    finalTranscript += event.results[i][0].transcript;
-                } else {
-                    interim += event.results[i][0].transcript;
-                }
-            }
-            document.getElementById('transcript').textContent = finalTranscript || interim;
-        };
-
-        recognition.onend = function() {
-            listening = false;
-            document.getElementById('status').textContent = 'CLICK MIC TO START SPEAKING';
-            document.getElementById('status').style.color = '#888';
-            document.getElementById('micBtn').style.background = 'transparent';
-            document.getElementById('micBtn').style.boxShadow = 'none';
-            document.getElementById('micIcon').setAttribute('stroke', '#5b5bd6');
-
-            if (finalTranscript.trim()) {
-                document.getElementById('status').textContent = 'SENDING TO AI...';
-                document.getElementById('status').style.color = '#34c759';
-                // Send to Streamlit
-                window.parent.postMessage({type: 'voice_input', text: finalTranscript.trim()}, '*');
-            }
-        };
-
-        recognition.onerror = function(event) {
-            listening = false;
-            document.getElementById('status').textContent = 'ERROR: ' + event.error.toUpperCase() + '. TRY AGAIN.';
-            document.getElementById('status').style.color = '#ff6666';
-            document.getElementById('micBtn').style.background = 'transparent';
-            document.getElementById('micBtn').style.boxShadow = 'none';
-            document.getElementById('micIcon').setAttribute('stroke', '#5b5bd6');
-        };
-    }
-
-    function toggleListening() {
-        if (!SpeechRecognition) return;
-        if (listening) {
-            recognition.stop();
-        } else {
-            finalTranscript = '';
-            document.getElementById('transcript').textContent = '';
-            recognition.start();
-        }
-    }
-    </script>
-    """
-    components.html(voice_html, height=220)
-
-    # Check for voice input via query params workaround
-    # Since Streamlit components can't directly set session state,
-    # we use a text input as a bridge
-    voice_text = st.text_input("Voice transcription (auto-filled):", key="voice_bridge", placeholder="Your speech will appear here...", label_visibility="collapsed")
-
-    if st.button("Send Voice Message", use_container_width=True, type="primary", disabled=(doc_count == 0)):
-        if voice_text and voice_text.strip():
-            question = voice_text.strip()
-            st.session_state.messages.append({"role": "user", "content": "[VOICE] " + question})
-
-            with st.chat_message("user"):
-                st.markdown("[VOICE] " + question)
-
-            with st.chat_message("assistant"):
-                with st.spinner("Searching..."):
-                    result = safe_ask(question=question, chat_history=st.session_state.chat_history, prompt_version=prompt_version)
-
-                answer = result["answer"]
-                st.markdown(answer)
-
-                if result.get("sources"):
-                    pills_html = " ".join(['<span class="src-pill">SRC: ' + s + '</span>' for s in result["sources"]])
-                    st.markdown(pills_html, unsafe_allow_html=True)
-
-                if not result.get("blocked"):
-                    lat = str(int(result.get("latency_ms", 0))) + "ms"
-                    tok = str(result.get("input_tokens", 0) + result.get("output_tokens", 0)) + " tok"
-                    cost = "$" + format(result.get("cost_usd", 0), ".4f")
-                    st.markdown('<div class="m-strip"><span class="m-item">' + lat + '</span><span class="m-item">' + tok + '</span><span class="m-item">' + cost + '</span></div>', unsafe_allow_html=True)
-
-                # Text-to-Speech: speak the answer using browser TTS
-                tts_js = """
-                <script>
-                    const utterance = new SpeechSynthesisUtterance(`""" + answer.replace('`', "'").replace('"', '\\"').replace('\n', ' ')[:500] + """`);
-                    utterance.rate = 1.0;
-                    utterance.pitch = 1.0;
-                    utterance.lang = 'en-US';
-                    // Pick a natural voice if available
-                    const voices = speechSynthesis.getVoices();
-                    const preferred = voices.find(v => v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Natural'));
-                    if (preferred) utterance.voice = preferred;
-                    speechSynthesis.speak(utterance);
-                </script>
-                """
-                components.html(tts_js, height=0)
-
-            st.session_state.messages.append({"role": "assistant", "content": answer, "sources": result.get("sources", []), "metrics": result})
-            st.session_state.chat_history.append((question, answer))
-
-    st.caption("Tip: Click the mic, speak your question, then click 'Send Voice Message'. The AI will speak its answer back to you.")
+    st.caption("Click 'START RECORDING', speak your question, then click 'STOP RECORDING'. The AI will answer and speak its response.")
 
 # ============================================================
 # FOOTER
