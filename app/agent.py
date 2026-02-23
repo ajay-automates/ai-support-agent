@@ -8,11 +8,9 @@ import os
 import time
 from typing import Optional
 from langchain_anthropic import ChatAnthropic
-from langchain.chains import ConversationalRetrievalChain
-from langchain.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
-from langchain.memory import ConversationBufferWindowMemory
+from langchain_core.prompts import ChatPromptTemplate
 from langsmith import traceable
-from app.ingest import get_vectorstore, get_embeddings
+from app.ingest import get_vectorstore
 
 # ============================================================
 # LANGSMITH CONFIGURATION
@@ -70,15 +68,6 @@ def ask_question(
 ) -> dict:
     """
     Ask a question to the support agent.
-
-    Args:
-        question: The user's question
-        collection_name: Which business's documents to search
-        chat_history: Previous conversation turns
-        prompt_version: Which prompt template to use
-
-    Returns:
-        dict with: answer, sources, tokens, cost, latency
     """
     start_time = time.time()
 
@@ -121,7 +110,7 @@ Answer the question using ONLY the context above. If the context doesn't contain
 
     # Format chat history
     history_text = ""
-    for h_q, h_a in chat_history[-3:]:  # Keep last 3 turns
+    for h_q, h_a in chat_history[-3:]:
         history_text += f"Customer: {h_q}\nAgent: {h_a}\n"
 
     # Call LLM
@@ -159,15 +148,12 @@ Answer the question using ONLY the context above. If the context doesn't contain
 def check_guardrails(question: str) -> dict:
     """
     Check if a question should be answered or blocked.
-    Returns: {"allowed": True/False, "reason": str}
     """
     question_lower = question.lower().strip()
 
-    # Block empty questions
     if not question_lower or len(question_lower) < 3:
         return {"allowed": False, "reason": "Question too short"}
 
-    # Block obvious prompt injection attempts
     injection_patterns = [
         "ignore previous", "ignore above", "forget your instructions",
         "you are now", "act as", "pretend you are",
@@ -177,7 +163,6 @@ def check_guardrails(question: str) -> dict:
         if pattern in question_lower:
             return {"allowed": False, "reason": "Potential prompt injection detected"}
 
-    # Block requests for harmful content
     harmful_patterns = [
         "how to hack", "how to steal", "illegal",
         "exploit vulnerability", "bypass security",
@@ -200,7 +185,6 @@ def safe_ask(
     Ask a question with guardrail checks.
     This is the main entry point for the chat interface.
     """
-    # Step 1: Check guardrails
     guard_result = check_guardrails(question)
     if not guard_result["allowed"]:
         return {
@@ -212,7 +196,6 @@ def safe_ask(
             "latency_ms": 0,
         }
 
-    # Step 2: Ask the question
     result = ask_question(
         question=question,
         collection_name=collection_name,
