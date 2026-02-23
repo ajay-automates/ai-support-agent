@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
 """
 AI Support Agent - Voice + Text Edition
-Uses streamlit-mic-recorder for real voice input with browser speech recognition.
+Voice: OpenAI Whisper (STT) + OpenAI TTS for fast, natural conversation.
+Text: LangChain RAG + Claude + ChromaDB + LangSmith.
 """
 
 import os
 import sys
+import io
+import base64
+import tempfile
 
 try:
     import streamlit as st
-    for key in ["LANGSMITH_API_KEY", "LANGCHAIN_API_KEY", "ANTHROPIC_API_KEY", "LANGCHAIN_TRACING_V2", "LANGCHAIN_PROJECT"]:
+    for key in ["LANGSMITH_API_KEY", "LANGCHAIN_API_KEY", "ANTHROPIC_API_KEY", "LANGCHAIN_TRACING_V2", "LANGCHAIN_PROJECT", "OPENAI_API_KEY"]:
         if key in st.secrets:
             os.environ[key] = st.secrets[key]
     if "LANGSMITH_API_KEY" in st.secrets and "LANGCHAIN_API_KEY" not in os.environ:
@@ -23,12 +27,17 @@ os.environ.setdefault("LANGSMITH_TRACING", "true")
 
 import streamlit as st
 import streamlit.components.v1 as components
-import tempfile
 
 sys.path.insert(0, os.path.dirname(__file__))
 from app.ingest import ingest_text, ingest_file, get_collection_stats, clear_collection
 from app.agent import safe_ask
-from streamlit_mic_recorder import speech_to_text
+from streamlit_mic_recorder import mic_recorder
+from openai import OpenAI
+
+# OpenAI client for Whisper + TTS
+openai_client = None
+if os.environ.get("OPENAI_API_KEY"):
+    openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 st.set_page_config(page_title="Support Agent AI", page_icon="bolt", layout="wide", initial_sidebar_state="expanded")
 
@@ -47,9 +56,9 @@ st.markdown("""
     [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.06) !important; margin: 1.2rem 0 !important; }
     [data-testid="stSidebar"] [data-testid="stMetricValue"] { color: #5b5bd6 !important; font-family: 'JetBrains Mono', monospace !important; font-size: 2.8rem !important; font-weight: 500 !important; }
     [data-testid="stSidebar"] .stMetric label { color: #5a5a65 !important; font-size: 0.7rem !important; text-transform: uppercase !important; letter-spacing: 1.5px !important; }
-    [data-testid="stSidebar"] .stButton > button { background: #5b5bd6 !important; color: #ffffff !important; border: none !important; border-radius: 10px !important; padding: 11px 20px !important; font-weight: 600 !important; font-size: 0.85rem !important; transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important; box-shadow: 0 1px 3px rgba(91,91,214,0.3), 0 6px 16px rgba(91,91,214,0.15) !important; }
-    [data-testid="stSidebar"] .stButton > button:hover { background: #4c4cbf !important; transform: translateY(-1px) !important; }
-    [data-testid="stSidebar"] [data-testid="stFileUploader"] { border: 1.5px dashed rgba(255,255,255,0.08) !important; border-radius: 12px !important; background: rgba(255,255,255,0.02) !important; }
+    [data-testid="stSidebar"] .stButton > button { background: #5b5bd6 !important; color: #ffffff !important; border: none !important; border-radius: 10px !important; padding: 11px 20px !important; font-weight: 600 !important; }
+    [data-testid="stSidebar"] .stButton > button:hover { background: #4c4cbf !important; }
+    [data-testid="stSidebar"] [data-testid="stFileUploader"] { border: 1.5px dashed rgba(255,255,255,0.08) !important; border-radius: 12px !important; }
     [data-testid="stSidebar"] textarea { background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 10px !important; }
     .hero { position: relative; background: #0a0a0b; border-radius: 24px; padding: 48px 44px 44px; margin-bottom: 32px; overflow: hidden; border: 1px solid rgba(255,255,255,0.06); }
     .hero::before { content: ''; position: absolute; top: -60%; right: -20%; width: 500px; height: 500px; background: radial-gradient(circle, rgba(91,91,214,0.15) 0%, transparent 70%); pointer-events: none; }
@@ -141,7 +150,55 @@ if doc_count == 0:
     st.info("Upload documents or paste text in the sidebar to get started.")
 
 # ============================================================
-# INIT STATE
+# HELPER FUNCTIONS
+# ============================================================
+def transcribe_audio(audio_bytes):
+    """Transcribe audio using OpenAI Whisper."""
+    if not openai_client:
+        return None
+    audio_file = io.BytesIO(audio_bytes)
+    audio_file.name = "recording.wav"
+    transcript = openai_client.audio.transcriptions.create(
+        model="whisper-1",
+        file=audio_file,
+        language="en",
+    )
+    return transcript.text
+
+
+def generate_speech(text):
+    """Generate speech audio using OpenAI TTS. Returns audio bytes."""
+    if not openai_client:
+        return None
+    # Truncate to 4096 chars (TTS limit)
+    clean_text = text[:4096]
+    response = openai_client.audio.speech.create(
+        model="tts-1",
+        voice="nova",  # Natural female voice, good for support
+        input=clean_text,
+        response_format="mp3",
+    )
+    return response.content
+
+
+def display_metrics(result):
+    """Display latency/tokens/cost metrics."""
+    if not result.get("blocked"):
+        lat = str(int(result.get("latency_ms", 0))) + "ms"
+        tok = str(result.get("input_tokens", 0) + result.get("output_tokens", 0)) + " tok"
+        cost = "$" + format(result.get("cost_usd", 0), ".4f")
+        st.markdown('<div class="m-strip"><span class="m-item">' + lat + '</span><span class="m-item">' + tok + '</span><span class="m-item">' + cost + '</span></div>', unsafe_allow_html=True)
+
+
+def display_sources(result):
+    """Display source pills."""
+    if result.get("sources"):
+        pills_html = " ".join(['<span class="src-pill">SRC: ' + s + '</span>' for s in result["sources"]])
+        st.markdown(pills_html, unsafe_allow_html=True)
+
+
+# ============================================================
+# STATE
 # ============================================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -164,42 +221,6 @@ with col2:
         st.rerun()
 
 # ============================================================
-# HELPER: Process a question and display result
-# ============================================================
-def process_question(question, voice=False):
-    prefix = "[VOICE] " if voice else ""
-    st.session_state.messages.append({"role": "user", "content": prefix + question})
-
-    with st.chat_message("user"):
-        st.markdown(prefix + question)
-
-    with st.chat_message("assistant"):
-        with st.spinner("Searching knowledge base..."):
-            result = safe_ask(question=question, chat_history=st.session_state.chat_history, prompt_version=prompt_version)
-
-        answer = result["answer"]
-        st.markdown(answer)
-
-        if result.get("sources"):
-            pills_html = " ".join(['<span class="src-pill">SRC: ' + s + '</span>' for s in result["sources"]])
-            st.markdown(pills_html, unsafe_allow_html=True)
-
-        if not result.get("blocked"):
-            lat = str(int(result.get("latency_ms", 0))) + "ms"
-            tok = str(result.get("input_tokens", 0) + result.get("output_tokens", 0)) + " tok"
-            cost = "$" + format(result.get("cost_usd", 0), ".4f")
-            st.markdown('<div class="m-strip"><span class="m-item">' + lat + '</span><span class="m-item">' + tok + '</span><span class="m-item">' + cost + '</span></div>', unsafe_allow_html=True)
-
-        # Text-to-speech for voice mode
-        if voice and not result.get("blocked"):
-            clean_answer = answer.replace('`', "'").replace('"', "'").replace('\n', ' ')[:500]
-            tts_js = '<script>setTimeout(function(){var u=new SpeechSynthesisUtterance("' + clean_answer + '");u.rate=1.0;u.lang="en-US";speechSynthesis.speak(u);},500);</script>'
-            components.html(tts_js, height=0)
-
-    st.session_state.messages.append({"role": "assistant", "content": answer, "sources": result.get("sources", []), "metrics": result})
-    st.session_state.chat_history.append((question, answer))
-
-# ============================================================
 # DISPLAY CHAT HISTORY
 # ============================================================
 for message in st.session_state.messages:
@@ -214,6 +235,10 @@ for message in st.session_state.messages:
             tok = str(m.get("input_tokens", 0) + m.get("output_tokens", 0)) + " tok"
             cost = "$" + format(m.get("cost_usd", 0), ".4f")
             st.markdown('<div class="m-strip"><span class="m-item">' + lat + '</span><span class="m-item">' + tok + '</span><span class="m-item">' + cost + '</span></div>', unsafe_allow_html=True)
+        # Show audio player if voice response was saved
+        if message.get("audio_b64"):
+            audio_bytes = base64.b64decode(message["audio_b64"])
+            st.audio(audio_bytes, format="audio/mp3")
 
 # ============================================================
 # TEXT MODE
@@ -223,35 +248,84 @@ if st.session_state.chat_mode == "text":
         if doc_count == 0:
             st.warning("Upload documents first.")
         else:
-            process_question(prompt, voice=False)
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            with st.chat_message("assistant"):
+                with st.spinner("Searching..."):
+                    result = safe_ask(question=prompt, chat_history=st.session_state.chat_history, prompt_version=prompt_version)
+                st.markdown(result["answer"])
+                display_sources(result)
+                display_metrics(result)
+            st.session_state.messages.append({"role": "assistant", "content": result["answer"], "sources": result.get("sources", []), "metrics": result})
+            st.session_state.chat_history.append((prompt, result["answer"]))
 
 # ============================================================
-# VOICE MODE
+# VOICE MODE (OpenAI Whisper STT + OpenAI TTS)
 # ============================================================
 if st.session_state.chat_mode == "voice":
     st.markdown("---")
-    st.markdown('<div class="voice-label">CLICK THE BUTTON BELOW TO SPEAK</div>', unsafe_allow_html=True)
 
-    # speech_to_text from streamlit-mic-recorder
-    # This component handles mic recording + browser speech recognition
-    # Returns transcribed text directly into Streamlit
-    text = speech_to_text(
-        language="en",
-        start_prompt="START RECORDING",
-        stop_prompt="STOP RECORDING",
-        just_once=True,
-        use_container_width=True,
-        key="voice_stt",
-    )
+    if not openai_client:
+        st.error("OpenAI API key not found. Add OPENAI_API_KEY to your Streamlit secrets.")
+    else:
+        st.markdown('<div class="voice-label">RECORD YOUR QUESTION</div>', unsafe_allow_html=True)
 
-    if text:
-        st.markdown("**You said:** " + text)
-        if doc_count == 0:
-            st.warning("Upload documents first.")
-        else:
-            process_question(text, voice=True)
+        # Record audio using mic_recorder
+        audio = mic_recorder(
+            start_prompt="START RECORDING",
+            stop_prompt="STOP RECORDING",
+            just_once=True,
+            use_container_width=True,
+            key="voice_recorder",
+        )
 
-    st.caption("Click 'START RECORDING', speak your question, then click 'STOP RECORDING'. The AI will answer and speak its response.")
+        if audio and audio.get("bytes"):
+            if doc_count == 0:
+                st.warning("Upload documents first.")
+            else:
+                # Step 1: Transcribe with Whisper
+                with st.spinner("Transcribing with Whisper..."):
+                    question = transcribe_audio(audio["bytes"])
+
+                if question and question.strip():
+                    st.markdown("**You said:** " + question)
+
+                    # Add user message
+                    st.session_state.messages.append({"role": "user", "content": "[VOICE] " + question})
+                    with st.chat_message("user"):
+                        st.markdown("[VOICE] " + question)
+
+                    # Step 2: Get AI answer from RAG pipeline
+                    with st.chat_message("assistant"):
+                        with st.spinner("Searching knowledge base..."):
+                            result = safe_ask(question=question, chat_history=st.session_state.chat_history, prompt_version=prompt_version)
+
+                        answer = result["answer"]
+                        st.markdown(answer)
+                        display_sources(result)
+                        display_metrics(result)
+
+                        # Step 3: Generate speech with OpenAI TTS
+                        audio_b64 = None
+                        if not result.get("blocked"):
+                            with st.spinner("Generating voice response..."):
+                                speech_bytes = generate_speech(answer)
+                            if speech_bytes:
+                                st.audio(speech_bytes, format="audio/mp3", autoplay=True)
+                                audio_b64 = base64.b64encode(speech_bytes).decode()
+
+                    st.session_state.messages.append({
+                        "role": "assistant", "content": answer,
+                        "sources": result.get("sources", []),
+                        "metrics": result,
+                        "audio_b64": audio_b64,
+                    })
+                    st.session_state.chat_history.append((question, answer))
+                else:
+                    st.warning("Could not understand the audio. Please try again.")
+
+        st.caption("Click START RECORDING, speak your question, click STOP RECORDING. Whisper transcribes, Claude answers, and you hear the response via OpenAI TTS.")
 
 # ============================================================
 # FOOTER
