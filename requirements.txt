@@ -8,3 +8,4 @@ chromadb>=0.5.0
 sentence-transformers>=3.0.0
 langsmith>=0.2.0
 pypdf>=4.0.0
+streamlit-mic-recorder>=0.0.8
