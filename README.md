@@ -1,16 +1,20 @@
-# 🤖 AI Support Agent Platform
+<div align="center">
 
-**Upload your docs. Get an AI-powered customer support chatbot in minutes.**
+<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=8,12,20&height=170&section=header&text=AI%20Support%20Agent&fontSize=48&fontAlignY=35&animation=twinkling&fontColor=ffffff&desc=RAG%20Chatbot%20with%20LangSmith%20Observability%20%7C%20LLMOps&descAlignY=55&descSize=18" width="100%" />
 
-Built with LangChain, LangSmith, ChromaDB, and Claude API. Full LLMOps: tracing, evaluation, monitoring, and guardrails.
+[![Live Demo](https://img.shields.io/badge/Live-Demo-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://ai-agent-support.streamlit.app)
+[![LangChain](https://img.shields.io/badge/LangChain-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white)](.)
+[![LangSmith](https://img.shields.io/badge/LangSmith-Tracing-FF8C00?style=for-the-badge)](.)
+[![Claude API](https://img.shields.io/badge/Claude-Sonnet-8B5CF6?style=for-the-badge&logo=anthropic&logoColor=white)](.)
+[![ChromaDB](https://img.shields.io/badge/ChromaDB-Vector%20Store-FF6B6B?style=for-the-badge)](.)
+[![Streamlit](https://img.shields.io/badge/Streamlit-Cloud-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](.)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
-**Author:** Ajay Kumar Reddy Nelavetla | February 2026
+**Upload your docs. Get an AI-powered customer support chatbot in minutes. Full LLMOps pipeline.**
 
----
+[Live Demo](https://ai-agent-support.streamlit.app) · [Architecture](#architecture) · [LLMOps Components](#llmops-components) · [Quick Start](#quick-start)
 
-## Live Demo
-
-🔗 **[Try it live on Streamlit Cloud](https://ai-support-agent.streamlit.app)** *(link active after deployment)*
+</div>
 
 ---
 
@@ -87,7 +91,6 @@ ai-support-agent/
 │   └── secrets.toml.example  # Secrets template
 ├── streamlit_app.py          # Main chat interface
 ├── requirements.txt
-├── .gitignore
 └── README.md
 ```
 
@@ -114,13 +117,11 @@ git clone https://github.com/ajay-automates/ai-support-agent.git
 cd ai-support-agent
 pip install -r requirements.txt
 
-# Set environment variables
 export ANTHROPIC_API_KEY="your-key"
 export LANGSMITH_API_KEY="your-key"
 export LANGSMITH_TRACING=true
 export LANGSMITH_PROJECT=ai-support-agent
 
-# Run
 streamlit run streamlit_app.py
 ```
 
@@ -128,14 +129,16 @@ streamlit run streamlit_app.py
 
 ## LangSmith Observability
 
-Every request is automatically traced in LangSmith. You can see:
+Every request is automatically traced in LangSmith:
 
-- **Full execution trace** — document retrieval → LLM call → response
-- **Latency per step** — where time is spent
-- **Token usage** — input and output tokens per request
-- **Cost tracking** — USD cost per request
-- **Guardrail triggers** — blocked requests and reasons
-- **Retrieval quality** — which documents were retrieved
+| Metric | Details |
+|--------|---------|
+| **Full execution trace** | Document retrieval → LLM call → response |
+| **Latency per step** | Where time is spent in the pipeline |
+| **Token usage** | Input and output tokens per request |
+| **Cost tracking** | USD cost per request |
+| **Guardrail triggers** | Blocked requests and reasons |
+| **Retrieval quality** | Which documents were retrieved and why |
 
 View your traces at [smith.langchain.com](https://smith.langchain.com)
 
@@ -143,14 +146,16 @@ View your traces at [smith.langchain.com](https://smith.langchain.com)
 
 ## Features
 
-- 📄 **Multi-format upload** — PDF, TXT, MD files
-- 📋 **Paste text directly** — FAQ, policies, documentation
-- 💬 **Chat interface** — conversational with history
-- 📎 **Source citations** — every answer cites its source document
-- 🛡️ **Guardrails** — blocks prompt injection and harmful requests
-- 📊 **Per-message metrics** — latency, tokens, cost shown inline
-- 🔄 **Prompt versioning** — switch between v1 (simple) and v2 (detailed)
-- 🔍 **LangSmith tracing** — full observability on every request
+| Feature | Description |
+|---------|-------------|
+| **Multi-format upload** | PDF, TXT, MD files |
+| **Paste text directly** | FAQ, policies, documentation |
+| **Chat interface** | Conversational with history |
+| **Source citations** | Every answer cites its source document |
+| **Guardrails** | Blocks prompt injection and harmful requests |
+| **Per-message metrics** | Latency, tokens, cost shown inline |
+| **Prompt versioning** | Switch between v1 (simple) and v2 (detailed) |
+| **LangSmith tracing** | Full observability on every request |
 
 ---
 
@@ -167,19 +172,7 @@ View your traces at [smith.langchain.com](https://smith.langchain.com)
 
 ---
 
-## For Businesses
-
-Want an AI support agent for your business? I'll set it up for you.
-
-1. Send me your FAQ / documentation / policies
-2. I deploy a custom agent trained on YOUR data
-3. Your customers get instant AI-powered answers 24/7
-
-**Contact:** [LinkedIn](https://linkedin.com/in/ajaykumarreddynelavetla) | [GitHub](https://github.com/ajay-automates)
-
----
-
-## Technologies
+## Tech Stack
 
 `LangChain` `LangSmith` `ChromaDB` `Anthropic Claude` `Streamlit` `HuggingFace Embeddings` `RAG` `Python` `Prompt Engineering` `LLMOps`
 
@@ -187,9 +180,20 @@ Want an AI support agent for your business? I'll set it up for you.
 
 ## Related Projects
 
-- [Resume Analyzer (QLoRA Fine-Tuning)](https://github.com/ajay-automates/advanced-resume-analyzer-qlora)
-- [AI Code Review Bot](https://github.com/ajay-automates/ai-code-review-bot)
+| Project | Description |
+|---------|-------------|
+| [Advanced Resume Analyzer (QLoRA)](https://github.com/ajay-automates/advanced-resume-analyzer-qlora) | Fine-tuned Gemma 3 4B with QLoRA |
+| [AI Code Review Bot](https://github.com/ajay-automates/ai-code-review-bot) | Automated PR reviews via Claude + GitHub Actions |
+| [AI Image Classifier API](https://github.com/ajay-automates/ai-image-classifier-api) | Self-hosted CLIP inference — $0/request |
 
 ---
 
-*Built with 🔥 in February 2026*
+<div align="center">
+
+**Built by [Ajay Kumar Reddy Nelavetla](https://github.com/ajay-automates)** · February 2026
+
+*Production RAG with full observability. Not a tutorial — a deployed system.*
+
+<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=8,12,20&height=100&section=footer" width="100%" />
+
+</div>
